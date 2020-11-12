@@ -1,6 +1,8 @@
 import sys
 from PyQt5.QtWidgets import QApplication
 from ui.windows import InputDialog
+import cgitb
+cgitb.enable(format='text')
 
 
 DEBUG = True

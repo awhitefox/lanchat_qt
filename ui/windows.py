@@ -1,24 +1,28 @@
 import time
 from PyQt5 import uic
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QMainWindow, QDialog, QInputDialog, QMessageBox
 from lanchat import networking
 from lanchat import return_codes as codes
 from sql.helpers import SQLHelper
 
 
-MAX_UNSAVED = 0
+MAX_UNSAVED = 10
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, client: networking.Client, server: networking.Server = None):
+    error = pyqtSignal(str)
+
+    def __init__(self, client: networking.Client):
         super().__init__()
         uic.loadUi('ui/main.ui', self)
         self.closeEvent = self.on_window_close
         self.pushButton_deleteHistory.pressed.connect(self.on_history_delete_btn)
+        self.pushButton_exit.pressed.connect(lambda: self.close())
+        self.error.connect(self.show_error)
 
         self.client = client
-        self.server = server
+        self.server = None
         self.users = []
 
         self.sql_helper = SQLHelper()
@@ -26,6 +30,9 @@ class MainWindow(QMainWindow):
         self.server_name = ':'.join(map(str, self.client.get_addr()))
         for elem in self.sql_helper.load_history(self.server_name):
             self.print_message(elem[0], elem[1], elem[2], True)
+
+    def attach_server(self, server):
+        self.server = server
 
     def print(self, text, darken=False):
         self.listWidget_chat.addItem(text)
@@ -43,7 +50,7 @@ class MainWindow(QMainWindow):
             self.listWidget_users.addItem(u)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Return:
+        if event.key() == Qt.Key_Return and self.lineEdit.isEnabled():
             text = self.lineEdit.text()
             if text != '':
                 self.lineEdit.setText('')
@@ -80,18 +87,24 @@ class MainWindow(QMainWindow):
             self.sql_helper.delete_from_server_and_commit(self.server_name)
             self.listWidget_chat.clear()
 
-    def on_connection_close(self):
+    def on_connection_close(self, show_error=True):
+        self.lineEdit.setEnabled(False)
         self.client.close()
         if self.server is not None:
             self.server.close()
         if not self.sql_helper.get_closed():
             self.sql_helper.commit()
             self.sql_helper.close()
-        print('connections_close')
+        if show_error:
+            self.error.emit('Сервер закрыл подключение')
+            return
 
     def on_window_close(self, event):
-        print('window_close')
-        self.on_connection_close()
+        print('window close')
+        self.on_connection_close(False)
+
+    def show_error(self, string):
+        QMessageBox.critical(self, 'Ошибка', string)
 
 
 class InputDialog(QDialog):
@@ -111,14 +124,24 @@ class InputDialog(QDialog):
         port = self.spinBox_port.value()
         return ip, port
 
-    def on_connect_btn(self):
+    def switch_to_main(self, srv : networking.Server = None):
         cl = networking.Client()
-        cl.connect(*self.get_addr())
+        addr = self.get_addr()
+        try:
+            cl.connect(*addr)
+        except OSError as e:
+            cl.close()
+            if srv:
+                srv.close()
+            QMessageBox.critical(self, 'Ошибка', str(e))
+            return
 
         text = f'Введите имя пользовтеля (максимум символов: {cl.get_username_limit()})'
         username, ok_pressed = QInputDialog.getText(self, 'Имя пользовтеля', text)
         if not ok_pressed:
             cl.close()
+            if srv:
+                srv.close()
             return
 
         main = MainWindow(cl)
@@ -127,13 +150,26 @@ class InputDialog(QDialog):
             main.load_users(users)
             main.show()
             self.close()
-        except networking.NetworkingError as e:
+        except (OSError, networking.NetworkingError) as e:
             cl.close()
+            if srv:
+                srv.close()
             main.close()
-            QMessageBox.critical(self, 'Ошибка', e.args[0])
+            QMessageBox.critical(self, 'Ошибка', str(e))
+            return
+
+    def on_connect_btn(self):
+        self.switch_to_main()
 
     def on_host_btn(self):
-        pass  # TODO
+        srv = networking.Server()
+        try:
+            srv.bind(*self.get_addr())
+        except OSError as e:
+            srv.close()
+            QMessageBox.critical(self, 'Ошибка', str(e))
+            return
+        self.switch_to_main(srv)
 
     def on_del_history_older_than_btn(self):
         days, ok_pressed = QInputDialog.getInt(self,
