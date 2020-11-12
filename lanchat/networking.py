@@ -78,6 +78,7 @@ class Server:
         self.usernames = []
 
     def bind(self, host: str, port: int):
+        print('server: bind')
         self.sock.bind((host, port))
         self.accept_thread.start()
 
@@ -99,8 +100,8 @@ class Server:
             self.disconnect(conn)
 
     def disconnect(self, sock):
+        print('server: disconnect')
         with self.list_lock:
-            print('disconnect')
             i = self.connections.index(sock)
             username = self.usernames[i]
             sock.close()
@@ -109,8 +110,8 @@ class Server:
         self.broadcast(encode_packet(code=codes.DISCONNECT, username=username, time=int(time())))
 
     def close(self):
+        print('server: close')
         with self.list_lock:
-            print('close')
             if self.closed:
                 return
 
@@ -123,7 +124,6 @@ class Server:
 
     def on_receive(self, sock: socket.socket, received_data: dict):
         with self.list_lock:
-            print('on_receive')
             username = self.usernames[self.connections.index(sock)]
         self.broadcast(encode_packet(code=codes.MESSAGE,
                                      author=username,
@@ -131,12 +131,16 @@ class Server:
                                      time=int(time())))
 
     def on_accept(self, conn: socket.socket):
-        conn.send(encode_packet(code=codes.AUTHORIZE, username_limit=self.username_limit))
+        print('server: authorization')
         try:
+            conn.send(encode_packet(code=codes.AUTHORIZE, username_limit=self.username_limit))
             data = decode_packet(conn.recv(SIZE))
         except json.JSONDecodeError:
             conn.send(encode_packet(code=codes.BAD_PAYLOAD))
-            print('refuse')
+            conn.close()
+            return
+        except ConnectionResetError:
+            conn.close()
             return
         username = data['username']
         if len(username) > self.username_limit:
@@ -148,10 +152,10 @@ class Server:
             conn.close()
             return
         with self.list_lock:
-            print('on_accept')
             conn.send(encode_packet(code=codes.OK, users=self.usernames))
             self.connections.append(conn)
             self.usernames.append(username)
+        print('server: authorization accept')
         ReceiveThread(conn, self.on_receive, self.on_connection_close).start()
         self.broadcast(encode_packet(code=codes.CONNECT, username=username, time=int(time())))
 
