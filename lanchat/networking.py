@@ -9,6 +9,7 @@ from .error_strings import ERROR_STRINGS
 
 ENCODING = 'utf-8'
 SIZE = 1024
+logging_lock = Lock()
 
 
 class Client:
@@ -53,9 +54,9 @@ class Client:
             return
         self.receive_thread.stop()
         self.sock.close()
+        self.closed = True
         if with_callback:
             self.close_callback()
-        self.closed = True
 
     def on_receive(self, sock, payload: dict):
         code = payload['code']
@@ -76,11 +77,12 @@ class Server:
         self.accept_thread = ServerAcceptThread(self.sock, self.on_accept)
         self.connections = []
         self.usernames = []
+        log('server: init')
 
     def bind(self, host: str, port: int):
-        print('server: bind')
         self.sock.bind((host, port))
         self.accept_thread.start()
+        log('server: bind')
 
     def get_username_limit(self) -> int:
         return self.username_limit
@@ -100,7 +102,7 @@ class Server:
             self.disconnect(conn)
 
     def disconnect(self, sock):
-        print('server: disconnect')
+        log('server: disconnect')
         with self.list_lock:
             i = self.connections.index(sock)
             username = self.usernames[i]
@@ -110,7 +112,6 @@ class Server:
         self.broadcast(encode_packet(code=codes.DISCONNECT, username=username, time=int(time())))
 
     def close(self):
-        print('server: close')
         with self.list_lock:
             if self.closed:
                 return
@@ -121,6 +122,7 @@ class Server:
             self.connections.clear()
             self.sock.close()
             self.closed = True
+        log('server: close')
 
     def on_receive(self, sock: socket.socket, received_data: dict):
         with self.list_lock:
@@ -131,7 +133,7 @@ class Server:
                                      time=int(time())))
 
     def on_accept(self, conn: socket.socket):
-        print('server: authorization')
+        log('server: authorization')
         try:
             conn.send(encode_packet(code=codes.AUTHORIZE, username_limit=self.username_limit))
             data = decode_packet(conn.recv(SIZE))
@@ -155,7 +157,7 @@ class Server:
             conn.send(encode_packet(code=codes.OK, users=self.usernames))
             self.connections.append(conn)
             self.usernames.append(username)
-        print('server: authorization accept')
+        log('server: authorization accept')
         ReceiveThread(conn, self.on_receive, self.on_connection_close).start()
         self.broadcast(encode_packet(code=codes.CONNECT, username=username, time=int(time())))
 
@@ -195,13 +197,14 @@ class ServerAcceptThread(Thread):
     def run(self):
         self.running = True
         self.sock.listen(1)
+        log('server: accept loop enter')
         try:
             while self.running:
                 conn, adr = self.sock.accept()
                 self.accept_callback(conn)
         except OSError:
-            print('server_accept_thread: error exit')
             self.running = False
+        log('server: accept loop exit')
 
     def stop(self):
         self.running = False
@@ -220,3 +223,8 @@ def encode_packet(**kwargs):
 
 def decode_packet(binary: bytes):
     return json.loads(binary.decode(ENCODING))
+
+
+def log(string: str):
+    with logging_lock:
+        print(string)
