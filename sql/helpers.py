@@ -1,4 +1,5 @@
 import sqlite3
+import os.path
 from time import time
 from threading import Lock
 
@@ -19,8 +20,13 @@ class SQLHelper:
     def __init__(self):
         self.lock = Lock()
         self.closed = False
+
+        db_exists = os.path.isfile(DB_PATH)
         self.con = sqlite3.connect(DB_PATH, check_same_thread=False)
         self.cur = self.con.cursor()
+        if not db_exists:
+            self.cur.execute(CREATE_CMD)
+            self.con.commit()
 
     def get_closed(self):
         return self.closed
