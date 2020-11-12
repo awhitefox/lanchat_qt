@@ -139,7 +139,7 @@ class Server:
             conn.send(encode_packet(code=codes.BAD_PAYLOAD))
             conn.close()
             return
-        except ConnectionResetError:
+        except OSError:
             conn.close()
             return
         username = data['username']
@@ -177,7 +177,7 @@ class ReceiveThread(Thread):
             while self.running:
                 data = json.loads(self.sock.recv(SIZE).decode(ENCODING))
                 self.receive_callback(self.sock, data)
-        except (ConnectionAbortedError, ConnectionResetError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError):
             self.running = False
             self.close_callback(self.sock)
 
@@ -199,9 +199,9 @@ class ServerAcceptThread(Thread):
             while self.running:
                 conn, adr = self.sock.accept()
                 self.accept_callback(conn)
-        except OSError as e:
+        except OSError:
+            print('server_accept_thread: error exit')
             self.running = False
-            raise e
 
     def stop(self):
         self.running = False
