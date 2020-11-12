@@ -1,5 +1,6 @@
 import socket
 import json
+from time import time
 from threading import Thread, Lock
 from typing import Callable
 from . import return_codes as codes
@@ -12,6 +13,7 @@ SIZE = 1024
 
 class Client:
     def __init__(self):
+        self.closed = False
         self.receive_callback = None
         self.close_callback = None
         self.username_limit = None
@@ -43,11 +45,17 @@ class Client:
     def get_username_limit(self):
         return self.username_limit
 
+    def get_addr(self):
+        return self.sock.getpeername()
+
     def close(self, with_callback=False):
+        if self.closed:
+            return
         self.receive_thread.stop()
         self.sock.close()
         if with_callback:
             self.close_callback()
+        self.closed = True
 
     def on_receive(self, sock, payload: dict):
         code = payload['code']
@@ -90,7 +98,7 @@ class Server:
         for conn in remove:
             self.disconnect(conn)
 
-    def disconnect(self, sock, kicked=False):
+    def disconnect(self, sock):
         with self.list_lock:
             print('disconnect')
             i = self.connections.index(sock)
@@ -98,8 +106,7 @@ class Server:
             sock.close()
             del self.connections[i]
             del self.usernames[i]
-        code = codes.KICK if kicked else codes.DISCONNECT
-        self.broadcast(encode_packet(code=code, username=username))
+        self.broadcast(encode_packet(code=codes.DISCONNECT, username=username, time=int(time())))
 
     def close(self):
         with self.list_lock:
@@ -120,7 +127,8 @@ class Server:
             username = self.usernames[self.connections.index(sock)]
         self.broadcast(encode_packet(code=codes.MESSAGE,
                                      author=username,
-                                     message=received_data['message']))
+                                     message=received_data['message'],
+                                     time=int(time())))
 
     def on_accept(self, conn: socket.socket):
         conn.send(encode_packet(code=codes.AUTHORIZE, username_limit=self.username_limit))
@@ -145,7 +153,7 @@ class Server:
             self.connections.append(conn)
             self.usernames.append(username)
         ReceiveThread(conn, self.on_receive, self.on_connection_close).start()
-        self.broadcast(encode_packet(code=codes.CONNECT, username=username))
+        self.broadcast(encode_packet(code=codes.CONNECT, username=username, time=int(time())))
 
     def on_connection_close(self, sock: socket.socket):
         self.disconnect(sock)
