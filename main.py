@@ -5,7 +5,7 @@ import cgitb
 cgitb.enable(format='text')
 
 
-DEBUG = True
+DEBUG = False
 
 
 def except_hook(cls, exception, traceback):

@@ -104,7 +104,10 @@ class Server:
     def disconnect(self, sock):
         log('server: disconnect')
         with self.list_lock:
-            i = self.connections.index(sock)
+            try:
+                i = self.connections.index(sock)
+            except ValueError:
+                return
             username = self.usernames[i]
             sock.close()
             del self.connections[i]

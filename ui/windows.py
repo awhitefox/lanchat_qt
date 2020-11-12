@@ -1,4 +1,5 @@
 import time
+from threading import Lock
 from PyQt5 import uic
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QMainWindow, QDialog, QInputDialog, QMessageBox
@@ -16,6 +17,8 @@ class MainWindow(QMainWindow):
     def __init__(self, client: networking.Client):
         super().__init__()
         uic.loadUi('ui/main.ui', self)
+        self.closeLock = Lock()
+        self.closed = False
         self.closeEvent = self.on_window_close
         self.pushButton_deleteHistory.pressed.connect(self.on_history_delete_btn)
         self.pushButton_exit.pressed.connect(lambda: self.close())
@@ -88,19 +91,21 @@ class MainWindow(QMainWindow):
             self.listWidget_chat.clear()
 
     def on_connection_close(self, show_error=True):
-        self.lineEdit.setEnabled(False)
-        self.client.close()
-        if self.server is not None:
-            self.server.close()
-        if not self.sql_helper.get_closed():
-            self.sql_helper.commit()
-            self.sql_helper.close()
-        if show_error:
-            self.error.emit('Сервер закрыл подключение')
+        if self.closed:
             return
+        with self.closeLock:
+            self.closed = True
+            self.lineEdit.setEnabled(False)
+            self.client.close()
+            if self.server is not None:
+                self.server.close()
+            if not self.sql_helper.get_closed():
+                self.sql_helper.commit()
+                self.sql_helper.close()
+            if show_error and self.server is None:
+                self.error.emit('Сервер закрыл подключение')
 
     def on_window_close(self, event):
-        print('window close')
         self.on_connection_close(False)
 
     def show_error(self, string):
@@ -124,7 +129,7 @@ class InputDialog(QDialog):
         port = self.spinBox_port.value()
         return ip, port
 
-    def switch_to_main(self, srv : networking.Server = None):
+    def switch_to_main(self, srv: networking.Server = None):
         cl = networking.Client()
         addr = self.get_addr()
         try:
@@ -145,6 +150,7 @@ class InputDialog(QDialog):
             return
 
         main = MainWindow(cl)
+        main.attach_server(srv)
         try:
             users = cl.authorize(username, main.on_receive, main.on_connection_close)
             main.load_users(users)
